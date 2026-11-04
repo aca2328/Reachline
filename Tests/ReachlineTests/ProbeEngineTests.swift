@@ -1,5 +1,5 @@
 import Testing
-@testable import ReachabilityDashboard
+@testable import Reachline
 
 struct ProbeEngineTests {
     let engine = ProbeEngine(timeout: 3)

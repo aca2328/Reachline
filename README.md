@@ -1,4 +1,4 @@
-# ReachabilityDashboard
+# Reachline
 
 Native macOS menu bar app for monitoring operator peering quality with ICMP, DNS, and HTTPS probes.
 
@@ -12,19 +12,19 @@ Native macOS menu bar app for monitoring operator peering quality with ICMP, DNS
 
 ## Install
 
-Download `ReachabilityDashboard.zip` from the [latest release](https://github.com/aca2328/ReachabilityDashboard/releases/latest), unzip it, and move `ReachabilityDashboard.app` to Applications. It runs on macOS 13 or later, on Apple silicon and Intel Macs.
+Download `Reachline.zip` from the [latest release](https://github.com/aca2328/Reachline/releases/latest), unzip it, and move `Reachline.app` to Applications. It runs on macOS 13 or later, on Apple silicon and Intel Macs.
 
 The app is ad-hoc signed, not notarized, so macOS blocks it the first time. Either open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or clear the download flag in Terminal:
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/ReachabilityDashboard.app
+xattr -dr com.apple.quarantine /Applications/Reachline.app
 ```
 
 To build it yourself instead, create a signed universal `.app` bundle (with icon) and copy it to Applications:
 
 ```sh
 ./bundle.sh
-cp -R .build/ReachabilityDashboard.app /Applications/
+cp -R .build/Reachline.app /Applications/
 ```
 
 The build number shown in the app is the git commit count at bundle time. Re-run `./bundle.sh` after pulling new commits.
@@ -32,7 +32,7 @@ The build number shown in the app is the git commit count at bundle time. Re-run
 ## Run from source
 
 ```sh
-swift run ReachabilityDashboard
+swift run Reachline
 ```
 
 Or pull the latest changes, do a clean release build, and run it:
@@ -51,7 +51,7 @@ The legacy Bash TUI remains available as:
 
 Choose **Edit Targets…** from the menu bar popover. Select a target to edit its name, host, probe type, network, and scope. **Test** runs one probe against the entered values without saving. **Save** checks every target, then applies the list immediately (unchanged targets keep their graph history).
 
-The list is stored in `~/Library/Application Support/ReachabilityDashboard/targets.json`. Delete that file to go back to the built-in defaults. `dashboard.sh` keeps its own hardcoded list and doesn't follow these edits.
+The list is stored in `~/Library/Application Support/Reachline/targets.json`. Delete that file to go back to the built-in defaults. `dashboard.sh` keeps its own hardcoded list and doesn't follow these edits.
 
 ## Probe Types
 

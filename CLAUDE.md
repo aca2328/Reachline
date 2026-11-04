@@ -3,16 +3,16 @@
 Native macOS dashboard (AppKit, Swift 6) monitoring ICMP/DNS/HTTPS probe latency to a fixed set of targets.
 
 ## Commands
-- Run in dev: `swift run ReachabilityDashboard`
+- Run in dev: `swift run Reachline`
 - Build release: `swift build --configuration release`
 - Build+run latest (pulls origin, clean rebuild): `./run.sh`
 - Package `.app` (universal, ad-hoc signed): `./bundle.sh`; publish a GitHub release `v1.0.<commit count>` with the zipped app: `./release.sh` (needs a clean tree pushed to `main`)
 - Legacy bash TUI (still maintained as fallback): `./dashboard.sh`
-- Run unit tests: `swift test` (Swift Testing, in `Tests/ReachabilityDashboardTests/`). Requires full Xcode installed (not just Command Line Tools) — without it, `swift test` can't locate the `Testing` framework.
+- Run unit tests: `swift test` (Swift Testing, in `Tests/ReachlineTests/`). Requires full Xcode installed (not just Command Line Tools) — without it, `swift test` can't locate the `Testing` framework.
 
 ## Architecture
-Single file: `Sources/ReachabilityDashboard/main.swift` (~800 lines).
-- `ProbeTarget`/`ProbeRow` — target list + per-target running state/history. `TargetStore` loads the list from `~/Library/Application Support/ReachabilityDashboard/targets.json` (falls back to `defaultTargets` if missing or undecodable); `TargetEditorController` edits it from the popover. `dashboard.sh` keeps its own hardcoded list
+Single file: `Sources/Reachline/main.swift` (~800 lines).
+- `ProbeTarget`/`ProbeRow` — target list + per-target running state/history. `TargetStore` loads the list from `~/Library/Application Support/Reachline/targets.json` (falls back to `defaultTargets` if missing or undecodable); `TargetEditorController` edits it from the popover. `dashboard.sh` keeps its own hardcoded list
 - `ProbeEngine` — validates and executes probes by shelling out to `/sbin/ping`, `/usr/bin/dig`, `/usr/bin/curl`; pure parsing logic (`parsePingOutput`, `parseDigOutput`, `parseCurlOutput`, `isIPv4`, `isHostname`) is split out from process execution so it's unit-testable
 - `ProbeGraphView` — custom NSView drawing the neon multi-line latency graph (Catmull-Rom smoothing, glow, floating labels)
 - `DashboardController` — AppKit app delegate; owns the window, the menu bar status item/popover, and the per-probe scheduling loop. Runs as an accessory app (no Dock icon); closing the window keeps it running, quit from the popover

@@ -126,11 +126,16 @@ let defaultTargets: [ProbeTarget] = [
 /// `swift run` and the .app bundle share it (UserDefaults domains would differ).
 enum TargetStore {
     static let fileURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("ReachabilityDashboard/targets.json")
+        .appendingPathComponent("Reachline/targets.json")
+    /// Settings folder used before the app was renamed from ReachabilityDashboard.
+    private static let legacyDirectoryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("ReachabilityDashboard")
 
     /// The saved list, or `defaultTargets` if there is none or it can't be
     /// decoded. A bad file is left in place, never overwritten on load.
     static func load() -> [ProbeTarget] {
+        // Fails harmlessly when there is no old folder or the new one already exists.
+        try? FileManager.default.moveItem(at: legacyDirectoryURL, to: fileURL.deletingLastPathComponent())
         guard let data = try? Data(contentsOf: fileURL),
               let targets = try? JSONDecoder().decode([ProbeTarget].self, from: data) else {
             return defaultTargets
@@ -929,7 +934,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             backing: .buffered,
             defer: true  // no backing store (or ~16 MB graph drawable) until first shown
         )
-        window.title = "Operator Peering Quality Dashboard"
+        window.title = "Reachline"
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -939,9 +944,6 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         root.spacing = 12
         root.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         root.translatesAutoresizingMaskIntoConstraints = false
-
-        let title = NSTextField(labelWithString: "Operator Peering Quality")
-        title.font = .systemFont(ofSize: 24, weight: .semibold)
 
         let version = NSTextField(labelWithString: "")
         version.font = .systemFont(ofSize: 11)
@@ -955,7 +957,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         subtitleLine.spacing = 8
         subtitleLine.alignment = .centerY
 
-        let header = NSStackView(views: [title, subtitleLine])
+        let header = NSStackView(views: [subtitleLine])
         header.orientation = .vertical
         header.spacing = 4
         
@@ -1142,9 +1144,6 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         popoverSparklines = []
         popoverLatencies = []
 
-        let title = NSTextField(labelWithString: "Operator Peering Quality")
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
-
         popoverSummary = NSTextField(labelWithString: "Starting...")
         popoverSummary.font = .systemFont(ofSize: 11)
         popoverSummary.textColor = .secondaryLabelColor
@@ -1181,7 +1180,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         let buttons = NSStackView(views: [quitButton, NSView(), editButton, openButton])
         buttons.orientation = .horizontal
 
-        let stack = NSStackView(views: [title, popoverSummary, grid, buttons])
+        let stack = NSStackView(views: [popoverSummary, grid, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -1220,7 +1219,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
                 .applying(NSImage.SymbolConfiguration(paletteColors: [health]))
             statusItem.button?.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right",
-                                               accessibilityDescription: "Reachability")?
+                                               accessibilityDescription: "Reachline")?
                 .withSymbolConfiguration(config)
         }
         if popover.isShown {

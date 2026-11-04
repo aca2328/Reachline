@@ -3,21 +3,21 @@
 import PackageDescription
 
 let package = Package(
-    name: "ReachabilityDashboard",
+    name: "Reachline",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "ReachabilityDashboard", targets: ["ReachabilityDashboard"])
+        .executable(name: "Reachline", targets: ["Reachline"])
     ],
     targets: [
         .executableTarget(
-            name: "ReachabilityDashboard",
-            path: "Sources/ReachabilityDashboard"
+            name: "Reachline",
+            path: "Sources/Reachline"
         ),
         .testTarget(
-            name: "ReachabilityDashboardTests",
-            dependencies: ["ReachabilityDashboard"]
+            name: "ReachlineTests",
+            dependencies: ["Reachline"]
         )
     ]
 )

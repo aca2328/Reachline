@@ -1,9 +1,9 @@
 #!/bin/zsh
 
-# Build script that packages ReachabilityDashboard as a macOS .app bundle
+# Build script that packages Reachline as a macOS .app bundle
 # This script:
 # 1. Builds the project in release mode (universal: arm64 + x86_64)
-# 2. Wraps the binary in .build/ReachabilityDashboard.app with its icon (make-icon.swift)
+# 2. Wraps the binary in .build/Reachline.app with its icon (make-icon.swift)
 # 3. Bakes the git commit count into Info.plist as the build number
 # 4. Ad-hoc signs the bundle
 
@@ -12,7 +12,7 @@ set -e
 SCRIPT_DIR="${0:A:h}"
 cd "$SCRIPT_DIR"
 
-APP_NAME="ReachabilityDashboard"
+APP_NAME="Reachline"
 APP_DIR=".build/$APP_NAME.app"
 BUILD_NUMBER="$(git rev-list --count HEAD)"
 ARCHS=(--arch arm64 --arch x86_64)  # universal, so the app also runs on Intel Macs
