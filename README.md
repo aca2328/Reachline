@@ -47,6 +47,10 @@ The legacy Bash TUI remains available as:
 ./dashboard.sh
 ```
 
+## Updates
+
+Reachline checks GitHub for a new release at launch and once a day. When one exists, the menu bar popover shows **Update to v1.0.N**: click it to download the release, verify it, replace the app, and relaunch. You can also click **Check for Updates** at any time. The app needs write access to the folder it's installed in; otherwise the button opens the release page instead.
+
 ## Editing targets
 
 Choose **Edit Targets…** from the menu bar popover. Select a target to edit its name, host, probe type, network, and scope. **Test** runs one probe against the entered values without saving. **Save** checks every target, then applies the list immediately (unchanged targets keep their graph history).

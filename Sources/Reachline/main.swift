@@ -206,6 +206,135 @@ final class CommandRunner {
 }
 
 
+/// Finds and installs new GitHub releases. Relies on release.sh's tag format
+/// (`v1.0.<build>`) and asset name (`Reachline.zip`).
+enum Updater {
+    struct Release: Equatable, Sendable {
+        let build: Int
+        let downloadURL: String
+        var version: String { "v1.0.\(build)" }
+    }
+
+    struct Failure: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    static let releasePageURL = URL(string: "https://github.com/aca2328/Reachline/releases/latest")!
+    private static let apiURL = "https://api.github.com/repos/aca2328/Reachline/releases/latest"
+    private static let appName = "Reachline.app"
+
+    private struct Payload: Decodable {
+        struct Asset: Decodable {
+            let name: String
+            let browser_download_url: String
+        }
+        let tag_name: String
+        let assets: [Asset]
+    }
+
+    /// The release described by the GitHub API response, or nil unless it has
+    /// a well-formed tag and a `Reachline.zip` hosted in this repo's releases.
+    static func parseRelease(_ data: Data) -> Release? {
+        guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              payload.tag_name.hasPrefix("v1.0."),
+              let build = Int(payload.tag_name.dropFirst("v1.0.".count)), build > 0,
+              let asset = payload.assets.first(where: { $0.name == "Reachline.zip" }),
+              asset.browser_download_url == "https://github.com/aca2328/Reachline/releases/download/\(payload.tag_name)/Reachline.zip" else {
+            return nil
+        }
+        return Release(build: build, downloadURL: asset.browser_download_url)
+    }
+
+    static func fetchLatest() throws -> Release? {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try curl(apiURL, to: file, timeout: 15)
+        return parseRelease(try Data(contentsOf: file))
+    }
+
+    /// Replacing the app needs a real, writable bundle: not `swift run`, and
+    /// not a read-only translocated copy that macOS is running from quarantine.
+    static func canInstall(over bundleURL: URL) -> Bool {
+        bundleURL.pathExtension == "app"
+            && !bundleURL.path.contains("/AppTranslocation/")
+            && FileManager.default.isWritableFile(atPath: bundleURL.deletingLastPathComponent().path)
+    }
+
+    /// Downloads and verifies the release, then swaps it in once `pid` exits.
+    /// Throws without touching the current app if any step before the swap fails.
+    static func install(_ release: Release, over bundleURL: URL, pid: Int32) throws {
+        let staging = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                                  appropriateFor: bundleURL, create: true)
+        do {
+            let zip = staging.appendingPathComponent("Reachline.zip")
+            try curl(release.downloadURL, to: zip, timeout: 300)
+            let app = try unpackAndVerify(zip: zip, into: staging, build: release.build)
+            let swap = Process()
+            swap.executableURL = URL(fileURLWithPath: "/bin/sh")
+            swap.arguments = ["-c", swapScript, "sh", String(pid), bundleURL.path, app.path, staging.path]
+            swap.standardInput = FileHandle.nullDevice
+            swap.standardOutput = FileHandle.nullDevice
+            swap.standardError = FileHandle.nullDevice
+            try swap.run()
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
+    }
+
+    /// Extracts the zip and returns its app, if that app is this app at exactly
+    /// `build` and its signature is intact.
+    static func unpackAndVerify(zip: URL, into directory: URL, build: Int) throws -> URL {
+        let extracted = directory.appendingPathComponent("extracted")
+        try run("/usr/bin/ditto", ["-x", "-k", zip.path, extracted.path], timeout: 60)
+        let app = extracted.appendingPathComponent(appName)
+        guard let info = Bundle(url: app)?.infoDictionary else {
+            throw Failure(message: "The download doesn't contain \(appName).")
+        }
+        guard info["CFBundleIdentifier"] as? String == "org.camerlo.Reachline" else {
+            throw Failure(message: "The download is a different app.")
+        }
+        guard info["CFBundleVersion"] as? String == String(build) else {
+            throw Failure(message: "The download's version doesn't match the release.")
+        }
+        try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path], timeout: 60)
+        return app
+    }
+
+    /// Run detached so it outlives the app. Arguments: pid, current app, new
+    /// app, staging folder. Puts the current app back if the new one won't move
+    /// in, and always reopens whichever app is left in place.
+    static let swapScript = """
+    export PATH=/usr/bin:/bin
+    pid="$1"; current="$2"; new="$3"; staging="$4"
+    while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
+    if ! mv "$current" "$staging/previous.app"; then
+        open "$current"
+        exit 1
+    fi
+    if mv "$new" "$current"; then
+        xattr -dr com.apple.quarantine "$current" 2>/dev/null
+        rm -rf "$staging"
+    else
+        mv "$staging/previous.app" "$current"
+    fi
+    open "$current"
+    """
+
+    private static func curl(_ url: String, to file: URL, timeout: TimeInterval) throws {
+        try run("/usr/bin/curl", ["--fail", "--silent", "--show-error", "--location",
+                                  "--max-time", String(Int(timeout)), "--output", file.path, url],
+                timeout: timeout + 5)
+    }
+
+    private static func run(_ path: String, _ arguments: [String], timeout: TimeInterval) throws {
+        if case let .failure(message) = CommandRunner.run(path, arguments, timeout: timeout) {
+            throw Failure(message: message)
+        }
+    }
+}
+
 final class ProbeEngine: @unchecked Sendable {
     private let timeout: TimeInterval
 
@@ -816,8 +945,6 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
     private var window: NSWindow!
     private var graphView: ProbeGraphView!
     private var footerLabel: NSTextField!
-    private var refreshButton: NSButton!
-    private var versionLabel: NSTextField!
     private var rows: [ProbeRow] = TargetStore.load().map { ProbeRow(target: $0) }
     private let engine = ProbeEngine(timeout: 3)
     // Each probe runs its own independent loop, so a slow target never blocks
@@ -842,6 +969,13 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
     private var popoverSummary: NSTextField!
     private var outsideClickMonitor: Any?
     private var lastHealth: NSColor?
+    private enum UpdateState: Equatable {
+        case idle, checking, upToDate, available(Updater.Release), installing, failed(String)
+    }
+    // Lives here, not on the button: rebuildPopover replaces the button after target edits.
+    private var updateState = UpdateState.idle
+    private var updateButton: NSButton!
+    private var updateTimer: Timer?
 
     private var buildNumber: Int {
         // Inside a .app bundle (built by bundle.sh) the working directory isn't
@@ -878,6 +1012,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         buildWindow()
         buildStatusItem()
         startProbing()
+        startUpdateChecks()
         // No frame timer yet: it only runs while the dashboard or popover is
         // visible (see startFrameTimer/stopFrameTimerIfIdle).
     }
@@ -934,7 +1069,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             backing: .buffered,
             defer: true  // no backing store (or ~16 MB graph drawable) until first shown
         )
-        window.title = "Reachline"
+        window.title = "Reachline \(versionString)"
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -945,35 +1080,8 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         root.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        let version = NSTextField(labelWithString: "")
-        version.font = .systemFont(ofSize: 11)
-        version.textColor = .secondaryLabelColor
-
-        let subtitle = NSTextField(labelWithString: "Native macOS probe dashboard for ICMP, DNS, and HTTPS path quality.")
-        subtitle.textColor = .secondaryLabelColor
-
-        let subtitleLine = NSStackView(views: [version, subtitle])
-        subtitleLine.orientation = .horizontal
-        subtitleLine.spacing = 8
-        subtitleLine.alignment = .centerY
-
-        let header = NSStackView(views: [subtitleLine])
-        header.orientation = .vertical
-        header.spacing = 4
-        
-        self.versionLabel = version
-        updateVersionLabel()
-
-        refreshButton = NSButton(title: "Refresh Now", target: self, action: #selector(refreshNow))
-        refreshButton.bezelStyle = .rounded
-
         footerLabel = NSTextField(labelWithString: "Starting...")
         footerLabel.textColor = .secondaryLabelColor
-
-        let controls = NSStackView(views: [footerLabel, NSView(), refreshButton])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 12
 
         graphView = ProbeGraphView()
         graphView.wantsLayer = true
@@ -995,9 +1103,8 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             graphView.bottomAnchor.constraint(equalTo: scrollView.contentView.bottomAnchor)
         ])
 
-        root.addArrangedSubview(header)
         root.addArrangedSubview(scrollView)
-        root.addArrangedSubview(controls)
+        root.addArrangedSubview(footerLabel)
 
         window.contentView = root
         NSLayoutConstraint.activate([
@@ -1051,18 +1158,6 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         updateStatusItem()
     }
     
-    private func updateVersionLabel() {
-        versionLabel.stringValue = versionString
-    }
-
-    @objc private func refreshNow() {
-        for index in rows.indices where rows[index].status != .configBad {
-            scheduled[index]?.cancel()
-            scheduled[index] = nil
-            probeOnce(index)
-        }
-    }
-
     /// Runs a single probe for one target off the main thread, then applies
     /// the result and schedules this probe's next run — independently of every
     /// other probe. `inFlight` guards against overlapping runs of the same one.
@@ -1147,6 +1242,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         popoverSummary = NSTextField(labelWithString: "Starting...")
         popoverSummary.font = .systemFont(ofSize: 11)
         popoverSummary.textColor = .secondaryLabelColor
+        popoverSummary.alignment = .center
 
         let grid = NSGridView()
         grid.rowSpacing = 4
@@ -1168,6 +1264,10 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         for index in 0..<grid.numberOfRows { grid.row(at: index).yPlacement = .center }
         if grid.numberOfColumns > 3 {
             grid.column(at: 3).xPlacement = .trailing
+            // Wide enough for the longest text, so the size set below still fits once values arrive.
+            let widest = NSTextField(labelWithString: "config bad")
+            widest.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            grid.column(at: 3).width = widest.fittingSize.width
         }
 
         let openButton = NSButton(title: "Open Dashboard", target: self, action: #selector(openDashboard))
@@ -1180,17 +1280,24 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         let buttons = NSStackView(views: [quitButton, NSView(), editButton, openButton])
         buttons.orientation = .horizontal
 
-        let stack = NSStackView(views: [popoverSummary, grid, buttons])
+        updateButton = NSButton(title: "", target: self, action: #selector(updateClicked))
+        updateButton.bezelStyle = .rounded
+
+        let stack = NSStackView(views: [popoverSummary, grid, updateButton, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.edgeInsets = NSEdgeInsets(top: 7, left: 7, bottom: 7, right: 7)
         buttons.widthAnchor.constraint(greaterThanOrEqualTo: grid.widthAnchor).isActive = true
+        popoverSummary.widthAnchor.constraint(equalTo: buttons.widthAnchor).isActive = true
 
         let content = NSViewController()
         content.view = stack
+        // Without this the popover opens narrower than its content, squeezing out the side margins.
+        content.preferredContentSize = stack.fittingSize
         popover.contentViewController = content
 
+        renderUpdateState()
         updateStatusItem()
     }
 
@@ -1297,12 +1404,89 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         NSApp.terminate(nil)
     }
 
+    /// Quietly checks shortly after launch and then daily; a failed automatic
+    /// check changes nothing. The timer's only idle cost is one wakeup a day.
+    private func startUpdateChecks() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.checkForUpdates(manual: false)
+        }
+        let timer = Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkForUpdates(manual: false) }
+        }
+        timer.tolerance = 60 * 60
+        updateTimer = timer
+    }
+
+    private func checkForUpdates(manual: Bool) {
+        guard updateState != .checking, updateState != .installing else { return }
+        if manual { setUpdateState(.checking) }
+        let currentBuild = buildNumber
+        DispatchQueue.global(qos: .utility).async {
+            let result = Result { try Updater.fetchLatest() }
+            Task { @MainActor in
+                guard self.updateState != .installing else { return }
+                switch result {
+                case let .success(release?) where release.build > currentBuild:
+                    self.setUpdateState(.available(release))
+                case .success:
+                    if manual { self.setUpdateState(.upToDate) }
+                case let .failure(error):
+                    if manual { self.setUpdateState(.failed(error.localizedDescription)) }
+                }
+            }
+        }
+    }
+
+    @objc private func updateClicked() {
+        guard case let .available(release) = updateState else {
+            checkForUpdates(manual: true)
+            return
+        }
+        let bundleURL = Bundle.main.bundleURL
+        guard Updater.canInstall(over: bundleURL) else {
+            NSWorkspace.shared.open(Updater.releasePageURL)
+            return
+        }
+        setUpdateState(.installing)
+        let pid = ProcessInfo.processInfo.processIdentifier
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try Updater.install(release, over: bundleURL, pid: pid) }
+            Task { @MainActor in
+                switch result {
+                case .success: NSApp.terminate(nil)
+                case let .failure(error): self.setUpdateState(.failed(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    private func setUpdateState(_ state: UpdateState) {
+        updateState = state
+        renderUpdateState()
+    }
+
+    private func renderUpdateState() {
+        updateButton.isEnabled = updateState != .checking && updateState != .installing
+        updateButton.toolTip = nil
+        switch updateState {
+        case .idle: updateButton.title = "Check for Updates"
+        case .checking: updateButton.title = "Checking…"
+        case .upToDate: updateButton.title = "Up to Date"
+        case let .available(release): updateButton.title = "Update to \(release.version)"
+        case .installing: updateButton.title = "Updating…"
+        case let .failed(message):
+            updateButton.title = "Update Failed, Try Again"
+            updateButton.toolTip = message
+        }
+        // A new title can change the content width; keep the popover fitted so the margins hold.
+        if let content = popover.contentViewController {
+            content.preferredContentSize = content.view.fittingSize
+        }
+    }
+
     private func updateFooter() {
-        let ok = rows.filter { $0.status == .ok }.count
-        let bad = rows.filter { $0.status == .configBad }.count
         let latencies = rows.compactMap { $0.latencyMs }
-        let avg = latencies.isEmpty ? "no latency samples" : "\(latencies.reduce(0, +) / latencies.count) ms avg"
-        footerLabel.stringValue = "\(ok)/\(rows.count) probes OK, \(bad) config bad, \(avg)."
+        footerLabel.stringValue = "Average latency: " + (latencies.isEmpty ? "-" : "\(latencies.reduce(0, +) / latencies.count) ms")
     }
 }
 
