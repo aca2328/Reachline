@@ -9,9 +9,12 @@ Native macOS dashboard (AppKit, Swift 6) monitoring ICMP/DNS/HTTPS probe latency
 - Package `.app` (universal, ad-hoc signed): `./bundle.sh`; publish a GitHub release `v1.0.<commit count>` with the zipped app: `./release.sh` (needs a clean tree pushed to `main`)
 - Legacy bash TUI (still maintained as fallback): `./dashboard.sh`
 - Run unit tests: `swift test` (Swift Testing, in `Tests/ReachlineTests/`). Requires full Xcode installed (not just Command Line Tools) — without it, `swift test` can't locate the `Testing` framework.
+- Launch a build without touching real settings: `CFFIXED_USER_HOME=<tmp dir> .build/Reachline.app/Contents/MacOS/Reachline`
+- Measure memory with `footprint <pid>`, not RSS, which includes shared system memory and reads far higher.
+- Without Xcode, test logic by copying the types into a scratch `swiftc` harness; replace `open` in `Updater.swapScript` there so no test copy launches.
 
 ## Architecture
-Single file: `Sources/Reachline/main.swift` (~800 lines).
+Single file: `Sources/Reachline/main.swift` (~1800 lines).
 - `ProbeTarget`/`ProbeRow` — target list + per-target running state/history. `TargetStore` loads the list from `~/Library/Application Support/Reachline/targets.json` (falls back to `defaultTargets` if missing or undecodable); `TargetEditorController` edits it from the popover. `dashboard.sh` keeps its own hardcoded list
 - `ProbeEngine` — validates and executes probes by shelling out to `/sbin/ping`, `/usr/bin/dig`, `/usr/bin/curl`; pure parsing logic (`parsePingOutput`, `parseDigOutput`, `parseCurlOutput`, `isIPv4`, `isHostname`) is split out from process execution so it's unit-testable
 - `ProbeGraphView` — custom NSView drawing the neon multi-line latency graph (Catmull-Rom smoothing, glow, floating labels)
@@ -27,3 +30,7 @@ Single file: `Sources/Reachline/main.swift` (~800 lines).
 - `run.sh` does `git pull origin HEAD` + `rm -rf .build` before building — don't run it with uncommitted local changes you want to keep.
 - The graph is time-based: samples are timestamped when a probe completes, and a 60 fps timer only advances `ProbeGraphView.now`. The right edge deliberately shows `now - displayDelay` (4s, just over the slowest cadence) so the newest segment sits between known samples and never reshapes — keep `displayDelay` above the largest `refreshInterval`.
 - Performance: no `setShadow` blur in per-frame drawing — CG computes it with a CPU convolution every frame (measured ~77% vs ~30% CPU with the window open); the neon glow is layered translucent strokes instead. The 60 fps frame timer only runs while the dashboard or popover is visible (`startFrameTimer`/`stopFrameTimerIfIdle`, driven by occlusion and popover delegates), the dashboard window is created with `defer: true` and drops its layer contents on close, and the status item image is only rebuilt when overall health changes — keep all of these, they're what keep the menu-bar-idle state near 1% CPU / 16 MB.
+- Popover layout: `preferredContentSize = fittingSize` is required or the side margins collapse. The latency column and button row reserve their widest text ("config bad", "Updating…"), so later text changes can't overflow; check any new label against that.
+- `TargetStore.legacyDirectoryURL` deliberately keeps the old `ReachabilityDashboard` name to migrate existing settings; don't remove it in name cleanups.
+- Updates: running copies only check at launch and daily, so restart the app to see a new release immediately. A bug in the update path can't be fixed by an update; affected copies need a manual install.
+- `SMAppService.mainApp.status` can report `.notFound` rather than `.notRegistered` for ad-hoc signed bundles, so don't gate on `== .notRegistered`.
