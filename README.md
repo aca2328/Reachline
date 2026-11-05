@@ -5,7 +5,7 @@ Native macOS menu bar app for monitoring operator peering quality with ICMP, DNS
 ## Features
 
 - **Menu bar app**: starts as a menu bar icon only (no Dock icon). The icon is green when all probes are OK, orange when some fail, red when all fail, and gray before the first results.
-- **Popover**: click the icon for a per-target summary with live sparklines and latency, plus Open Dashboard, Edit Targets…, and Quit. Opening it doesn't bring the dashboard window forward.
+- **Popover**: click the icon for a per-target summary with live sparklines and latency, plus Dashboard, Targets…, and Quit. Opening it doesn't bring the dashboard window forward.
 - **Dashboard window**: a smooth, continuously scrolling neon latency graph (60 s of history) with floating labels. The y-axis eases to fit the data instead of snapping. Closing the window keeps the app running in the menu bar.
 - **Independent probes**: each target runs on its own loop and interval, so a slow target never holds up the others.
 - **Editable targets**: add, remove, and edit targets, test one before saving, or reset to the defaults.
@@ -49,11 +49,11 @@ The legacy Bash TUI remains available as:
 
 ## Updates
 
-Reachline checks GitHub for a new release at launch and once a day. When one exists, the menu bar popover shows **Update to v1.0.N**: click it to download the release, verify it, replace the app, and relaunch. You can also click **Check for Updates** at any time. The app needs write access to the folder it's installed in; otherwise the button opens the release page instead.
+Reachline checks GitHub for a new release at launch and once a day. When one exists, the menu bar popover shows an **Update** button: click it to download the release, verify it, replace the app, and relaunch. The app needs write access to the folder it's installed in; otherwise the button opens the release page instead.
 
 ## Editing targets
 
-Choose **Edit Targets…** from the menu bar popover. Select a target to edit its name, host, probe type, network, and scope. **Test** runs one probe against the entered values without saving. **Save** checks every target, then applies the list immediately (unchanged targets keep their graph history).
+Choose **Targets…** from the menu bar popover. Select a target to edit its name, host, probe type, network, and scope. **Test** runs one probe against the entered values without saving. **Save** checks every target, then applies the list immediately (unchanged targets keep their graph history).
 
 The list is stored in `~/Library/Application Support/Reachline/targets.json`. Delete that file to go back to the built-in defaults. `dashboard.sh` keeps its own hardcoded list and doesn't follow these edits.
 

@@ -970,7 +970,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
     private var outsideClickMonitor: Any?
     private var lastHealth: NSColor?
     private enum UpdateState: Equatable {
-        case idle, checking, upToDate, available(Updater.Release), installing, failed(String)
+        case idle, available(Updater.Release), installing, failed(Updater.Release, String)
     }
     // Lives here, not on the button: rebuildPopover replaces the button after target edits.
     private var updateState = UpdateState.idle
@@ -1115,7 +1115,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 420)
         ])
         // Not shown at launch: the app starts as a menu bar icon only, and the
-        // window appears via "Open Dashboard".
+        // window appears via the "Dashboard" button.
     }
 
     /// (Re)starts every probe's loop for the current `rows`.
@@ -1270,20 +1270,23 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             grid.column(at: 3).width = widest.fittingSize.width
         }
 
-        let openButton = NSButton(title: "Open Dashboard", target: self, action: #selector(openDashboard))
+        let openButton = NSButton(title: "Dashboard", target: self, action: #selector(openDashboard))
         openButton.bezelStyle = .rounded
         openButton.keyEquivalent = "\r"
-        let editButton = NSButton(title: "Edit Targets…", target: self, action: #selector(editTargets))
+        let editButton = NSButton(title: "Targets…", target: self, action: #selector(editTargets))
         editButton.bezelStyle = .rounded
         let quitButton = NSButton(title: "Quit", target: self, action: #selector(quit))
         quitButton.bezelStyle = .rounded
-        let buttons = NSStackView(views: [quitButton, NSView(), editButton, openButton])
-        buttons.orientation = .horizontal
-
         updateButton = NSButton(title: "", target: self, action: #selector(updateClicked))
         updateButton.bezelStyle = .rounded
+        let buttons = NSStackView(views: [quitButton, NSView(), updateButton, editButton, openButton])
+        buttons.orientation = .horizontal
+        buttons.spacing = 6
+        // Reserve room for the widest update state, so the button appearing never resizes the popover.
+        updateButton.title = "Updating…"
+        buttons.widthAnchor.constraint(greaterThanOrEqualToConstant: buttons.fittingSize.width).isActive = true
 
-        let stack = NSStackView(views: [popoverSummary, grid, updateButton, buttons])
+        let stack = NSStackView(views: [popoverSummary, grid, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -1404,43 +1407,36 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         NSApp.terminate(nil)
     }
 
-    /// Quietly checks shortly after launch and then daily; a failed automatic
-    /// check changes nothing. The timer's only idle cost is one wakeup a day.
+    /// Checks shortly after launch and then daily; a failed check changes
+    /// nothing. The timer's only idle cost is one wakeup a day.
     private func startUpdateChecks() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            self?.checkForUpdates(manual: false)
+            self?.checkForUpdates()
         }
         let timer = Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkForUpdates(manual: false) }
+            MainActor.assumeIsolated { self?.checkForUpdates() }
         }
         timer.tolerance = 60 * 60
         updateTimer = timer
     }
 
-    private func checkForUpdates(manual: Bool) {
-        guard updateState != .checking, updateState != .installing else { return }
-        if manual { setUpdateState(.checking) }
+    private func checkForUpdates() {
+        guard updateState != .installing else { return }
         let currentBuild = buildNumber
         DispatchQueue.global(qos: .utility).async {
-            let result = Result { try Updater.fetchLatest() }
+            guard let latest = try? Updater.fetchLatest(), latest.build > currentBuild else { return }
             Task { @MainActor in
                 guard self.updateState != .installing else { return }
-                switch result {
-                case let .success(release?) where release.build > currentBuild:
-                    self.setUpdateState(.available(release))
-                case .success:
-                    if manual { self.setUpdateState(.upToDate) }
-                case let .failure(error):
-                    if manual { self.setUpdateState(.failed(error.localizedDescription)) }
-                }
+                self.setUpdateState(.available(latest))
             }
         }
     }
 
     @objc private func updateClicked() {
-        guard case let .available(release) = updateState else {
-            checkForUpdates(manual: true)
-            return
+        let release: Updater.Release
+        switch updateState {
+        case let .available(found), let .failed(found, _): release = found
+        case .idle, .installing: return
         }
         let bundleURL = Bundle.main.bundleURL
         guard Updater.canInstall(over: bundleURL) else {
@@ -1454,7 +1450,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             Task { @MainActor in
                 switch result {
                 case .success: NSApp.terminate(nil)
-                case let .failure(error): self.setUpdateState(.failed(error.localizedDescription))
+                case let .failure(error): self.setUpdateState(.failed(release, error.localizedDescription))
                 }
             }
         }
@@ -1465,22 +1461,22 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         renderUpdateState()
     }
 
+    /// The button only shows when there's something to install.
     private func renderUpdateState() {
-        updateButton.isEnabled = updateState != .checking && updateState != .installing
-        updateButton.toolTip = nil
+        updateButton.isHidden = updateState == .idle
+        updateButton.isEnabled = updateState != .installing
         switch updateState {
-        case .idle: updateButton.title = "Check for Updates"
-        case .checking: updateButton.title = "Checking…"
-        case .upToDate: updateButton.title = "Up to Date"
-        case let .available(release): updateButton.title = "Update to \(release.version)"
-        case .installing: updateButton.title = "Updating…"
-        case let .failed(message):
-            updateButton.title = "Update Failed, Try Again"
+        case .idle:
+            break
+        case let .available(release):
+            updateButton.title = "Update"
+            updateButton.toolTip = "Update to \(release.version)"
+        case .installing:
+            updateButton.title = "Updating…"
+            updateButton.toolTip = nil
+        case let .failed(_, message):
+            updateButton.title = "Retry"
             updateButton.toolTip = message
-        }
-        // A new title can change the content width; keep the popover fitted so the margins hold.
-        if let content = popover.contentViewController {
-            content.preferredContentSize = content.view.fittingSize
         }
     }
 
