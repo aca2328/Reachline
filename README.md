@@ -47,6 +47,10 @@ The legacy Bash TUI remains available as:
 ./dashboard.sh
 ```
 
+## Open at login
+
+The first time Reachline runs from an Applications folder, it asks whether to open at login. It only asks once; to change your answer later, use System Settings › General › Login Items.
+
 ## Updates
 
 Reachline checks GitHub for a new release at launch and once a day. When one exists, the menu bar popover shows an **Update** button: click it to download the release, verify it, replace the app, and relaunch. The app needs write access to the folder it's installed in; otherwise the button opens the release page instead.

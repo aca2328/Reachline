@@ -34,3 +34,16 @@ struct UpdaterTests {
         #expect(Updater.parseRelease(Data("not json".utf8)) == nil)
     }
 }
+
+struct LoginItemTests {
+    @Test func offersOnlyFromApplicationsFolders() {
+        let home = "/Users/me"
+        func installed(_ path: String) -> Bool {
+            LoginItem.isInstalled(URL(fileURLWithPath: path), home: home)
+        }
+        #expect(installed("/Applications/Reachline.app"))
+        #expect(installed("/Users/me/Applications/Reachline.app"))
+        #expect(!installed("/Users/me/GitHub/Reachline/.build/Reachline.app"))
+        #expect(!installed("/Applications/Reachline"))
+    }
+}

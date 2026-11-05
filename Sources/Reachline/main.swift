@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import Foundation
 
 enum ProbeType: String, Codable, CaseIterable {
@@ -205,6 +206,38 @@ final class CommandRunner {
     }
 }
 
+
+/// Offers to add the app to Login Items, once. Only from an Applications folder:
+/// a login item pointing at a build folder would break on the next rebuild.
+enum LoginItem {
+    private static let askedKey = "didOfferLoginItem"
+
+    static func isInstalled(_ bundleURL: URL, home: String = NSHomeDirectory()) -> Bool {
+        bundleURL.pathExtension == "app"
+            && (bundleURL.path.hasPrefix("/Applications/") || bundleURL.path.hasPrefix(home + "/Applications/"))
+    }
+
+    @MainActor static func offerIfNeeded() {
+        guard isInstalled(Bundle.main.bundleURL),
+              // Not `== .notRegistered`: ad-hoc signed bundles can report .notFound until registered.
+              ![.enabled, .requiresApproval].contains(SMAppService.mainApp.status),
+              !UserDefaults.standard.bool(forKey: askedKey) else { return }
+        UserDefaults.standard.set(true, forKey: askedKey)
+
+        let alert = NSAlert()
+        alert.messageText = "Open Reachline at login?"
+        alert.informativeText = "Reachline will start in the menu bar when you log in. You can change this later in System Settings › General › Login Items."
+        alert.addButton(withTitle: "Open at Login")
+        alert.addButton(withTitle: "Not Now")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try SMAppService.mainApp.register()
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+}
 
 /// Finds and installs new GitHub releases. Relies on release.sh's tag format
 /// (`v1.0.<build>`) and asset name (`Reachline.zip`).
@@ -1013,6 +1046,8 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         buildStatusItem()
         startProbing()
         startUpdateChecks()
+        // Async so launch finishes before the dialog's modal loop starts.
+        DispatchQueue.main.async { LoginItem.offerIfNeeded() }
         // No frame timer yet: it only runs while the dashboard or popover is
         // visible (see startFrameTimer/stopFrameTimerIfIdle).
     }

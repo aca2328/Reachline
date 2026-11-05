@@ -16,6 +16,7 @@ Single file: `Sources/Reachline/main.swift` (~800 lines).
 - `ProbeEngine` — validates and executes probes by shelling out to `/sbin/ping`, `/usr/bin/dig`, `/usr/bin/curl`; pure parsing logic (`parsePingOutput`, `parseDigOutput`, `parseCurlOutput`, `isIPv4`, `isHostname`) is split out from process execution so it's unit-testable
 - `ProbeGraphView` — custom NSView drawing the neon multi-line latency graph (Catmull-Rom smoothing, glow, floating labels)
 - `Updater` — checks GitHub for the latest release, then downloads, verifies, and swaps in the new app using a detached shell script that waits for the app to quit. `parseRelease` is pure and unit-tested
+- `LoginItem` — asks once at launch (remembered in `UserDefaults`) whether to register with `SMAppService.mainApp`; only when installed in an Applications folder
 - `DashboardController` — AppKit app delegate; owns the window, the menu bar status item/popover, and the per-probe scheduling loop. Runs as an accessory app (no Dock icon); closing the window keeps it running, quit from the popover
 
 ## Gotchas
