@@ -255,12 +255,13 @@ enum Updater {
 
     static let releasePageURL = URL(string: "https://github.com/aca2328/Reachline/releases/latest")!
     private static let apiURL = "https://api.github.com/repos/aca2328/Reachline/releases/latest"
+    private static let assetURLPrefix = "https://api.github.com/repos/aca2328/Reachline/releases/assets/"
     private static let appName = "Reachline.app"
 
     private struct Payload: Decodable {
         struct Asset: Decodable {
             let name: String
-            let browser_download_url: String
+            let url: String
         }
         let tag_name: String
         let assets: [Asset]
@@ -268,15 +269,19 @@ enum Updater {
 
     /// The release described by the GitHub API response, or nil unless it has
     /// a well-formed tag and a `Reachline.zip` hosted in this repo's releases.
+    /// Downloads go through the API asset URL, not `browser_download_url`:
+    /// github.com's download front end can fail (504) while the API works.
     static func parseRelease(_ data: Data) -> Release? {
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
               payload.tag_name.hasPrefix("v1.0."),
               let build = Int(payload.tag_name.dropFirst("v1.0.".count)), build > 0,
               let asset = payload.assets.first(where: { $0.name == "Reachline.zip" }),
-              asset.browser_download_url == "https://github.com/aca2328/Reachline/releases/download/\(payload.tag_name)/Reachline.zip" else {
+              asset.url.hasPrefix(assetURLPrefix),
+              case let id = asset.url.dropFirst(assetURLPrefix.count),
+              !id.isEmpty, id.allSatisfy({ ("0"..."9").contains($0) }) else {
             return nil
         }
-        return Release(build: build, downloadURL: asset.browser_download_url)
+        return Release(build: build, downloadURL: asset.url)
     }
 
     static func fetchLatest() throws -> Release? {
@@ -301,7 +306,8 @@ enum Updater {
                                                   appropriateFor: bundleURL, create: true)
         do {
             let zip = staging.appendingPathComponent("Reachline.zip")
-            try curl(release.downloadURL, to: zip, timeout: 300)
+            // Without this header the API answers with the asset's JSON metadata.
+            try curl(release.downloadURL, to: zip, timeout: 300, headers: ["Accept: application/octet-stream"])
             let app = try unpackAndVerify(zip: zip, into: staging, build: release.build)
             let swap = Process()
             swap.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -355,9 +361,10 @@ enum Updater {
     open "$current"
     """
 
-    private static func curl(_ url: String, to file: URL, timeout: TimeInterval) throws {
+    private static func curl(_ url: String, to file: URL, timeout: TimeInterval, headers: [String] = []) throws {
         try run("/usr/bin/curl", ["--fail", "--silent", "--show-error", "--location",
-                                  "--max-time", String(Int(timeout)), "--output", file.path, url],
+                                  "--max-time", String(Int(timeout)), "--output", file.path]
+                                  + headers.flatMap { ["--header", $0] } + [url],
                 timeout: timeout + 5)
     }
 
