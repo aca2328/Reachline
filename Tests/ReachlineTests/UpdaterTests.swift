@@ -3,10 +3,11 @@ import Testing
 @testable import Reachline
 
 struct UpdaterTests {
-    private func json(tag: String, asset: String = "Reachline.zip", url: String? = nil) -> Data {
-        let link = url ?? "https://api.github.com/repos/aca2328/Reachline/releases/assets/714642952"
+    private func json(tag: String, asset: String = "Reachline.zip", link: String? = nil, url: String? = nil) -> Data {
+        let link = link ?? "https://github.com/aca2328/Reachline/releases/download/\(tag)/\(asset)"
+        let url = url ?? "https://api.github.com/repos/aca2328/Reachline/releases/assets/714642952"
         return Data("""
-        {"tag_name":"\(tag)","draft":false,"assets":[{"name":"\(asset)","url":"\(link)"}]}
+        {"tag_name":"\(tag)","draft":false,"assets":[{"name":"\(asset)","browser_download_url":"\(link)","url":"\(url)"}]}
         """.utf8)
     }
 
@@ -14,7 +15,8 @@ struct UpdaterTests {
         let release = Updater.parseRelease(json(tag: "v1.0.100"))
         #expect(release?.build == 100)
         #expect(release?.version == "v1.0.100")
-        #expect(release?.downloadURL == "https://api.github.com/repos/aca2328/Reachline/releases/assets/714642952")
+        #expect(release?.downloadURL == "https://github.com/aca2328/Reachline/releases/download/v1.0.100/Reachline.zip")
+        #expect(release?.apiDownloadURL == "https://api.github.com/repos/aca2328/Reachline/releases/assets/714642952")
     }
 
     @Test func rejectsReleaseWithOldAssetName() {
@@ -27,6 +29,8 @@ struct UpdaterTests {
     }
 
     @Test func rejectsDownloadsFromElsewhere() {
+        #expect(Updater.parseRelease(json(tag: "v1.0.100", link: "https://example.com/Reachline.zip")) == nil)
+        #expect(Updater.parseRelease(json(tag: "v1.0.100", link: "https://github.com/someone/Reachline/releases/download/v1.0.100/Reachline.zip")) == nil)
         #expect(Updater.parseRelease(json(tag: "v1.0.100", url: "https://example.com/Reachline.zip")) == nil)
         #expect(Updater.parseRelease(json(tag: "v1.0.100", url: "https://api.github.com/repos/someone/Reachline/releases/assets/714642952")) == nil)
         #expect(Updater.parseRelease(json(tag: "v1.0.100", url: "https://api.github.com/repos/aca2328/Reachline/releases/assets/")) == nil)
