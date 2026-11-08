@@ -144,12 +144,20 @@ enum TargetStore {
         return targets
     }
 
-    static func save(_ targets: [ProbeTarget]) throws {
-        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
+    /// A file this version can't decode (e.g. written by a newer one) was
+    /// replaced by `defaultTargets` on load; move it aside rather than lose it.
+    static func save(_ targets: [ProbeTarget], to url: URL = fileURL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
+        if let data = try? Data(contentsOf: url),
+           (try? JSONDecoder().decode([ProbeTarget].self, from: data)) == nil {
+            let backup = url.deletingPathExtension()
+                .appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970)).json")
+            try FileManager.default.moveItem(at: url, to: backup)
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(targets).write(to: fileURL, options: .atomic)
+        try encoder.encode(targets).write(to: url, options: .atomic)
     }
 }
 
