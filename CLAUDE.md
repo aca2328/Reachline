@@ -5,7 +5,6 @@ Native macOS dashboard (AppKit, Swift 6) monitoring ICMP/DNS/HTTPS probe latency
 ## Commands
 - Run in dev: `swift run Reachline`
 - Build release: `swift build --configuration release`
-- Build+run latest (pulls origin, clean rebuild): `./run.sh`
 - Package `.app` (universal, ad-hoc signed): `./bundle.sh`; publish a GitHub release `v1.0.<commit count>` with the zipped app: `./release.sh` (needs a clean tree pushed to `main`)
 - Legacy bash TUI (still maintained as fallback): `./dashboard.sh`
 - Run unit tests: `swift test` (Swift Testing, in `Tests/ReachlineTests/`). Requires full Xcode installed (not just Command Line Tools) — without it, `swift test` can't locate the `Testing` framework.
@@ -27,7 +26,6 @@ Single file: `Sources/Reachline/main.swift` (~1800 lines).
 - Probes require system binaries at fixed paths (`/sbin/ping`, `/usr/bin/dig`, `/usr/bin/curl`); missing ones mark a row `CONFIG_BAD` rather than failing the app.
 - `Updater` depends on `release.sh`: the `v1.0.<build>` tag, the `Reachline.zip` asset name with `Reachline.app` at its root, and the `org.camerlo.Reachline` bundle ID. Changing any of them silently stops updates for installed copies.
 - App version is derived at runtime from `git rev-list --count HEAD` (see `buildNumber`), not hand-bumped — don't add a manual version constant.
-- `run.sh` does `git pull origin HEAD` + `rm -rf .build` before building — don't run it with uncommitted local changes you want to keep.
 - The graph is time-based: samples are timestamped when a probe completes, and a 60 fps timer only advances `ProbeGraphView.now`. The right edge deliberately shows `now - displayDelay` (4s, just over the slowest cadence) so the newest segment sits between known samples and never reshapes — keep `displayDelay` above the largest `refreshInterval`.
 - Performance: no `setShadow` blur in per-frame drawing — CG computes it with a CPU convolution every frame (measured ~77% vs ~30% CPU with the window open); the neon glow is layered translucent strokes instead. The 60 fps frame timer only runs while the dashboard or popover is visible (`startFrameTimer`/`stopFrameTimerIfIdle`, driven by occlusion and popover delegates), the dashboard window is created with `defer: true` and drops its layer contents on close, and the status item image is only rebuilt when overall health changes — keep all of these, they're what keep the menu-bar-idle state near 1% CPU / 16 MB.
 - Popover layout: `preferredContentSize = fittingSize` is required or the side margins collapse. The latency column and button row reserve their widest text ("config bad", "Updating…"), so later text changes can't overflow; check any new label against that.
