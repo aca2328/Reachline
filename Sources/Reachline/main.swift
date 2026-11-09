@@ -930,6 +930,21 @@ final class ProbeGraphView: NSView {
 
 }
 
+/// Colors of the popover's dark panel, shared with Cpuline's.
+enum Palette {
+    static let canvas = NSColor(calibratedRed: 0.055, green: 0.067, blue: 0.10, alpha: 1)
+    static let blue = NSColor(srgbRed: 0.36, green: 0.36, blue: 1.00, alpha: 1)
+    static let text = NSColor.white.withAlphaComponent(0.92)
+}
+
+/// The popover's navy rounded panel, behind its header and rows.
+final class PopoverPanelView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        Palette.canvas.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10).fill()
+    }
+}
+
 /// A miniature, single-row version of `ProbeGraphView` for the menu bar
 /// popover. Shares its time axis (window and display delay) and line color,
 /// but scales y to its own row so small latencies stay readable.
@@ -1287,6 +1302,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         statusItem.button?.action = #selector(togglePopover)
         popover.behavior = .transient
         popover.delegate = self
+        popover.appearance = NSAppearance(named: .darkAqua)
         rebuildPopover()
     }
 
@@ -1297,21 +1313,32 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         popoverSparklines = []
         popoverLatencies = []
 
-        popoverSummary = NSTextField(labelWithString: "Starting...")
-        popoverSummary.font = .systemFont(ofSize: 11)
-        popoverSummary.textColor = .secondaryLabelColor
-        popoverSummary.alignment = .center
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        let title = NSTextField(labelWithAttributedString: NSAttributedString(string: "AVERAGE LATENCY", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: Palette.blue,
+            .kern: 0.4
+        ]))
+        popoverSummary = NSTextField(labelWithString: "-")
+        popoverSummary.font = font
+        popoverSummary.textColor = Palette.text
+        let header = NSStackView(views: [title, NSView(), popoverSummary])
+        header.orientation = .horizontal
 
         let grid = NSGridView()
         grid.rowSpacing = 4
         grid.columnSpacing = 8
         for (index, row) in rows.enumerated() {
             let dot = NSTextField(labelWithString: "●")
+            dot.font = .systemFont(ofSize: 10)
             let name = NSTextField(labelWithString: row.target.name)
+            name.font = font
+            name.textColor = Palette.text
             let sparkline = SparklineView()
             sparkline.color = ProbeGraphView.colors[index % ProbeGraphView.colors.count]
             let latency = NSTextField(labelWithString: "-")
-            latency.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            latency.font = font
+            latency.textColor = Palette.text
             latency.alignment = .right
             grid.addRow(with: [dot, name, sparkline, latency])
             popoverDots.append(dot)
@@ -1324,7 +1351,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
             grid.column(at: 3).xPlacement = .trailing
             // Wide enough for the longest text, so the size set below still fits once values arrive.
             let widest = NSTextField(labelWithString: "config bad")
-            widest.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            widest.font = font
             grid.column(at: 3).width = widest.fittingSize.width
         }
 
@@ -1344,13 +1371,28 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         updateButton.title = "Updating…"
         buttons.widthAnchor.constraint(greaterThanOrEqualToConstant: buttons.fittingSize.width).isActive = true
 
-        let stack = NSStackView(views: [popoverSummary, grid, buttons])
+        let rowsStack = NSStackView(views: [header, grid])
+        rowsStack.orientation = .vertical
+        rowsStack.alignment = .leading
+        rowsStack.spacing = 10
+        rowsStack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        rowsStack.translatesAutoresizingMaskIntoConstraints = false
+        header.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
+        let panel = PopoverPanelView()
+        panel.addSubview(rowsStack)
+        NSLayoutConstraint.activate([
+            rowsStack.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            rowsStack.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            rowsStack.topAnchor.constraint(equalTo: panel.topAnchor),
+            rowsStack.bottomAnchor.constraint(equalTo: panel.bottomAnchor)
+        ])
+
+        let stack = NSStackView(views: [panel, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 7, left: 7, bottom: 7, right: 7)
-        buttons.widthAnchor.constraint(greaterThanOrEqualTo: grid.widthAnchor).isActive = true
-        popoverSummary.widthAnchor.constraint(equalTo: buttons.widthAnchor).isActive = true
+        buttons.widthAnchor.constraint(equalTo: panel.widthAnchor).isActive = true
 
         let content = NSViewController()
         content.view = stack
@@ -1398,7 +1440,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
     /// Updates the popover's rows. Skipped while it's closed and run just
     /// before it opens instead.
     private func refreshPopover() {
-        popoverSummary.stringValue = footerLabel.stringValue
+        popoverSummary.stringValue = averageLatencyText
         for (index, row) in rows.enumerated() where index < popoverDots.count {
             popoverDots[index].textColor = switch row.status {
             case .ok: .systemGreen
@@ -1551,9 +1593,13 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         }
     }
 
-    private func updateFooter() {
+    private var averageLatencyText: String {
         let latencies = rows.compactMap { $0.latencyMs }
-        footerLabel.stringValue = "Average latency: " + (latencies.isEmpty ? "-" : "\(latencies.reduce(0, +) / latencies.count) ms")
+        return latencies.isEmpty ? "-" : "\(latencies.reduce(0, +) / latencies.count) ms"
+    }
+
+    private func updateFooter() {
+        footerLabel.stringValue = "Average latency: " + averageLatencyText
     }
 }
 
