@@ -1031,6 +1031,7 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
     private var updateState = UpdateState.idle
     private var updateButton: NSButton!
     private var updateTimer: Timer?
+    private var updateRetryTimer: Timer?
 
     private var buildNumber: Int {
         // Inside a .app bundle (built by bundle.sh) the working directory isn't
@@ -1464,8 +1465,8 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
         NSApp.terminate(nil)
     }
 
-    /// Checks shortly after launch and then daily; a failed check changes
-    /// nothing. The timer's only idle cost is one wakeup a day.
+    /// Checks shortly after launch and then daily; a failed check is retried
+    /// hourly until one succeeds. Idle cost is one wakeup a day.
     private func startUpdateChecks() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             self?.checkForUpdates()
@@ -1479,14 +1480,27 @@ final class DashboardController: NSObject, NSApplicationDelegate, NSPopoverDeleg
 
     private func checkForUpdates() {
         guard updateState != .installing else { return }
+        updateRetryTimer?.invalidate()
+        updateRetryTimer = nil
         let currentBuild = buildNumber
         DispatchQueue.global(qos: .utility).async {
-            guard let latest = try? Updater.fetchLatest(), latest.build > currentBuild else { return }
+            let latest = try? Updater.fetchLatest()
             Task { @MainActor in
-                guard self.updateState != .installing else { return }
+                guard let latest else { return self.retryUpdateCheck() }
+                guard latest.build > currentBuild, self.updateState != .installing else { return }
                 self.setUpdateState(.available(latest))
             }
         }
+    }
+
+    /// Covers a check at login, before the network is up, or a GitHub outage,
+    /// which would otherwise wait for the next daily check.
+    private func retryUpdateCheck() {
+        let timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkForUpdates() }
+        }
+        timer.tolerance = 5 * 60
+        updateRetryTimer = timer
     }
 
     @objc private func updateClicked() {
