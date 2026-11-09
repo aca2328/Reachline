@@ -9,6 +9,7 @@ Native macOS dashboard (AppKit, Swift 6) monitoring ICMP/DNS/HTTPS probe latency
 - Legacy bash TUI (still maintained as fallback): `./dashboard.sh`
 - Run unit tests: `swift test` (Swift Testing, in `Tests/ReachlineTests/`). Requires full Xcode installed (not just Command Line Tools) — without it, `swift test` can't locate the `Testing` framework.
 - Launch a build without touching real settings: `CFFIXED_USER_HOME=<tmp dir> .build/Reachline.app/Contents/MacOS/Reachline`
+- Read an installed app's version with `/usr/libexec/PlistBuddy -c "Print CFBundleVersion" <app>/Contents/Info.plist`, not `defaults read`: cfprefsd caches the plist, so after an update it can keep reporting the old version.
 - Measure memory with `footprint <pid>`, not RSS, which includes shared system memory and reads far higher.
 - Without Xcode, test logic by copying the types into a scratch `swiftc` harness; replace `open` in `Updater.swapScript` there so no test copy launches.
 
